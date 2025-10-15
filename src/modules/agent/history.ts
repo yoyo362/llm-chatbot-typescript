@@ -30,11 +30,26 @@ export async function getHistory(
   sessionId: string,
   limit: number = 5
 ): Promise<ChatbotResponse[]> {
-  // TODO: Execute the Cypher statement from /cypher/get-history.cypher in a read transaction
-  // TODO: Use string templating to make the limit dynamic: 0..${limit}
-  // const graph = await initGraph()
-  // const res = await graph.query<ChatbotResponse>(cypher, { sessionId }, "READ")
-  // return res
+  const graph = await initGraph();
+  
+  const cypher = `
+    MATCH (s:Session {id: $sessionId})-[:HAS_RESPONSE]->(r:Response)
+    RETURN r.id AS id,
+           r.input AS input,
+           r.rephrasedQuestion AS rephrasedQuestion,
+           r.output AS output,
+           r.cypher AS cypher
+    ORDER BY r.createdAt DESC
+    LIMIT ${limit}
+  `;
+  
+  const res = await graph.query<ChatbotResponse>(
+    cypher,
+    { sessionId },
+    "READ"
+  );
+  
+  return res;
 }
 // end::get[]
 
@@ -60,9 +75,39 @@ export async function saveHistory(
   ids: string[],
   cypher: string | null = null
 ): Promise<string> {
-  // TODO: Execute the Cypher statement from /cypher/save-response.cypher in a write transaction
-  // const graph = await initGraph()
-  // const res = await graph.query<{id: string}>(cypher, params, "WRITE")
-  // return res[0].id
+  const graph = await initGraph();
+  
+  const query = `
+    MERGE (s:Session {id: $sessionId})
+    CREATE (r:Response {
+      id: randomUUID(),
+      input: $input,
+      rephrasedQuestion: $rephrasedQuestion,
+      output: $output,
+      cypher: $cypher,
+      source: $source,
+      createdAt: datetime()
+    })
+    CREATE (s)-[:HAS_RESPONSE]->(r)
+    WITH r
+    UNWIND $ids AS contextId
+    MATCH (context) WHERE elementId(context) = contextId
+    CREATE (r)-[:CONTEXT]->(context)
+    RETURN r.id AS id
+  `;
+  
+  const params = {
+    sessionId,
+    source,
+    input,
+    rephrasedQuestion,
+    output,
+    cypher,
+    ids
+  };
+  
+  const res = await graph.query<{ id: string }>(query, params, "WRITE");
+  
+  return res[0].id;
 }
 // end::save[]
